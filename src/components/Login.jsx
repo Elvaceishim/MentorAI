@@ -26,7 +26,9 @@ function Login() {
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: window.location.origin
+        emailRedirectTo: import.meta.env.DEV 
+          ? 'http://localhost:5173'
+          : 'https://learnwithmentorai.netlify.app'
       }
     });
 
