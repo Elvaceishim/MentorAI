@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "sources": ["../../../../../../Users/mac/MentorAI/netlify/functions/test.js"],
+  "sourceRoot": "/var/folders/9v/fzccp8ks6mx74kxsphtk3_x80000gn/T/tmp-41188-JrPzuyj7CjdU",
+  "sourcesContent": ["export const handler = async (event, context) => {\n  return {\n    statusCode: 200,\n    body: JSON.stringify({ message: \"Hello from test function!\" })\n  };\n};\n"],
+  "mappings": ";;;;;;;;;;;;;;;;;;;AAAA;AAAA;AAAA;AAAA;AAAA;AAAO,IAAM,UAAU,OAAO,OAAO,YAAY;AAC/C,SAAO;AAAA,IACL,YAAY;AAAA,IACZ,MAAM,KAAK,UAAU,EAAE,SAAS,4BAA4B,CAAC;AAAA,EAC/D;AACF;",
+  "names": []
+}
