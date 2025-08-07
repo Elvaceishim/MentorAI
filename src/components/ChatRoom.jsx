@@ -206,9 +206,6 @@ export default function ChatRoom({ user }) {
       }
     };
     
-    // Clear current messages when switching rooms
-    setMessages([]);
-    
     fetchMessages();
     fetchReactions();
     fetchUserProfile();
@@ -243,7 +240,17 @@ export default function ChatRoom({ user }) {
           });
         }
       )
-      .subscribe();
+      .on('broadcast', { event: 'connection_status' }, (payload) => {
+        console.log('Connection status:', payload);
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('Successfully subscribed to room messages');
+        } else if (status === 'CLOSED') {
+          console.log('Room subscription closed, attempting to reconnect...');
+          // Optionally trigger a message refresh here
+        }
+      });
 
     // Listen for reaction changes
     const reactionSubscription = supabase
@@ -299,6 +306,61 @@ export default function ChatRoom({ user }) {
       supabase.removeChannel(typingSubscription);
     };
   }, [user, currentRoom]);
+
+  // Add periodic refresh to prevent message loss
+  useEffect(() => {
+    const refreshMessages = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("messages")
+          .select("*")
+          .eq("room_id", currentRoom)
+          .order("created_at", { ascending: true });
+        
+        if (!error && data) {
+          // Only update if we have fewer messages than what's in the database
+          if (data.length > messages.length) {
+            setMessages(data);
+          }
+        }
+      } catch (error) {
+        console.error('Error refreshing messages:', error);
+      }
+    };
+
+    // Refresh messages every 30 seconds to prevent data loss
+    const interval = setInterval(refreshMessages, 30000);
+    
+    return () => clearInterval(interval);
+  }, [currentRoom, messages.length]);
+
+  // Connection monitoring
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        // Page became visible again, refresh messages
+        const refreshMessages = async () => {
+          try {
+            const { data, error } = await supabase
+              .from("messages")
+              .select("*")
+              .eq("room_id", currentRoom)
+              .order("created_at", { ascending: true });
+            
+            if (!error && data) {
+              setMessages(data);
+            }
+          } catch (error) {
+            console.error('Error refreshing messages on visibility change:', error);
+          }
+        };
+        refreshMessages();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [currentRoom]);
 
   // Typing indicator functions
   const sendTypingIndicator = (typing) => {
@@ -641,8 +703,10 @@ export default function ChatRoom({ user }) {
   };
 
   const switchRoom = (roomId) => {
-    setCurrentRoom(roomId);
-    setMessages([]); // Clear current messages
+    if (roomId !== currentRoom) {
+      setCurrentRoom(roomId);
+      setMessages([]); // Only clear when actually switching to a different room
+    }
   };
 
   // File upload functionality
@@ -790,6 +854,20 @@ export default function ChatRoom({ user }) {
               title="Search messages"
             >
               <span className="text-lg">🔍</span>
+            </button>
+            <button
+              onClick={async () => {
+                const { data, error } = await supabase
+                  .from("messages")
+                  .select("*")
+                  .eq("room_id", currentRoom)
+                  .order("created_at", { ascending: true });
+                if (!error) setMessages(data || []);
+              }}
+              className="p-2 rounded-full bg-green-100 text-green-700 hover:bg-green-200 transition-all duration-200"
+              title="Refresh messages"
+            >
+              <span className="text-lg">🔄</span>
             </button>
             <button
               onClick={clearChatHistory}
@@ -1255,7 +1333,7 @@ export default function ChatRoom({ user }) {
         )}
         
         <div className="text-xs text-gray-500 text-center">
-          💡 <strong>Features:</strong> Enter to send • Ctrl+M for @mentor • Esc to clear • 📎 Upload files • 🔍 Search messages • 🗑️ Clear chat • 📋 Copy AI • ✏️ Edit your messages • 🗑️ Delete messages • 🔔 Sound notifications • 👤 Edit profile • 😄 React with emojis • ⌨️ Typing indicators
+          💡 <strong>Features:</strong> Enter to send • Ctrl+M for @mentor • Esc to clear • 📎 Upload files • 🔍 Search messages • � Refresh • �🗑️ Clear chat • 📋 Copy AI • ✏️ Edit your messages • 🗑️ Delete messages • 🔔 Sound notifications • 👤 Edit profile • 😄 React with emojis • ⌨️ Typing indicators
         </div>
         </div>
       </div>
