@@ -169,6 +169,23 @@ export default function ChatRoom({ user }) {
     }
   };
 
+  // Helper functions for user display
+  const getDisplayName = (email) => {
+    if (email === 'mentor@ai.assistant' || email === 'mentorai@assistant' || email === 'mentor@ai') {
+      return 'MentorAI';
+    }
+    const profile = userProfiles[email];
+    return profile?.display_name || email?.split('@')[0] || 'Unknown';
+  };
+
+  const getAvatar = (email) => {
+    if (email === 'mentor@ai.assistant' || email === 'mentorai@assistant' || email === 'mentor@ai') {
+      return '🧠';
+    }
+    const profile = userProfiles[email];
+    return profile?.avatar_emoji || '👤';
+  };
+
   useEffect(() => {
     // Fetch existing messages for current room
     const fetchMessages = async () => {
