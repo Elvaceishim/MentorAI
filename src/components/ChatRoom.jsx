@@ -4,6 +4,7 @@ import { supabase } from "../lib/supabaseClient";
 import { v4 as uuidv4 } from "uuid";
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import ProfileModal from './ProfileModal';
 
 export default function ChatRoom({ user }) {
   const [messages, setMessages] = useState([]);
@@ -16,9 +17,24 @@ export default function ChatRoom({ user }) {
   });
   const [reactions, setReactions] = useState({});
   const [showEmojiPicker, setShowEmojiPicker] = useState(null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [userProfile, setUserProfile] = useState(null);
+  const [userProfiles, setUserProfiles] = useState({});
+  const [currentRoom, setCurrentRoom] = useState('general');
+  const [rooms, setRooms] = useState([]);
+  const [showRoomModal, setShowRoomModal] = useState(false);
+  const [newRoomName, setNewRoomName] = useState('');
+  const [uploadingFile, setUploadingFile] = useState(false);
   const [editingMessage, setEditingMessage] = useState(null);
   const [editContent, setEditContent] = useState("");
+  const [typingUsers, setTypingUsers] = useState({});
+  const [isTyping, setIsTyping] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [showSearch, setShowSearch] = useState(false);
+  const fileInputRef = useRef();
   const bottomRef = useRef();
+  const typingTimeoutRef = useRef();
 
   // Available emoji reactions
   const availableEmojis = ['👍', '❤️', '😄', '😮', '😢', '😡', '🎉', '🤔'];
@@ -154,11 +170,12 @@ export default function ChatRoom({ user }) {
   };
 
   useEffect(() => {
-    // Fetch existing messages
+    // Fetch existing messages for current room
     const fetchMessages = async () => {
       const { data, error } = await supabase
         .from("messages")
         .select("*")
+        .eq("room_id", currentRoom)
         .order("created_at", { ascending: true });
       
       if (error) {
@@ -169,13 +186,21 @@ export default function ChatRoom({ user }) {
     
     fetchMessages();
     fetchReactions();
+    fetchUserProfile();
+    fetchAllUserProfiles();
+    fetchRooms();
 
-    // Listen for new messages
+    // Listen for new messages in current room
     const subscription = supabase
-      .channel("room1")
+      .channel(`room-${currentRoom}`)
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages" },
+        { 
+          event: "INSERT", 
+          schema: "public", 
+          table: "messages",
+          filter: `room_id=eq.${currentRoom}`
+        },
         (payload) => {
           // Check if message already exists to avoid duplicates
           setMessages((prev) => {
@@ -207,11 +232,71 @@ export default function ChatRoom({ user }) {
       )
       .subscribe();
 
+    // Listen for typing indicators
+    const typingSubscription = supabase
+      .channel(`typing-${currentRoom}`)
+      .on(
+        "broadcast",
+        { event: "typing" },
+        (payload) => {
+          const { user: typingUser, displayName, typing } = payload.payload;
+          if (typingUser !== user.email) {
+            setTypingUsers(prev => {
+              if (typing) {
+                return { ...prev, [typingUser]: displayName };
+              } else {
+                const updated = { ...prev };
+                delete updated[typingUser];
+                return updated;
+              }
+            });
+          }
+        }
+      )
+      .subscribe();
+
     return () => {
       supabase.removeChannel(subscription);
       supabase.removeChannel(reactionSubscription);
+      supabase.removeChannel(typingSubscription);
     };
-  }, [user]);
+  }, [user, currentRoom]);
+
+  // Typing indicator functions
+  const sendTypingIndicator = (typing) => {
+    supabase
+      .channel(`typing-${currentRoom}`)
+      .send({
+        type: 'broadcast',
+        event: 'typing',
+        payload: { 
+          user: user.email, 
+          displayName: getDisplayName(user.email),
+          typing 
+        }
+      });
+  };
+
+  const handleTypingChange = (value) => {
+    setNewMsg(value);
+    
+    // Send typing indicator
+    if (!isTyping && value.length > 0) {
+      setIsTyping(true);
+      sendTypingIndicator(true);
+    }
+    
+    // Clear existing timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    
+    // Set new timeout to stop typing after 2 seconds of inactivity
+    typingTimeoutRef.current = setTimeout(() => {
+      setIsTyping(false);
+      sendTypingIndicator(false);
+    }, 2000);
+  };
 
   // Enhanced keyboard shortcut handler
   const handleKeyDown = (e) => {
@@ -238,10 +323,20 @@ export default function ChatRoom({ user }) {
   async function sendMessage() {
     if (!newMsg.trim()) return;
 
+    // Stop typing indicator
+    if (isTyping) {
+      setIsTyping(false);
+      sendTypingIndicator(false);
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+    }
+
     const message = {
       id: uuidv4(),
       content: newMsg,
       user_email: user.email,
+      room_id: currentRoom,
       created_at: new Date().toISOString(),
     };
 
@@ -288,6 +383,7 @@ export default function ChatRoom({ user }) {
             id: uuidv4(),
             content: result.reply,
             user_email: 'mentor@ai.assistant',
+            room_id: currentRoom,
             created_at: new Date().toISOString(),
           };
           
@@ -303,6 +399,7 @@ export default function ChatRoom({ user }) {
           id: uuidv4(),
           content: `Sorry, I'm having trouble responding right now. Please try again in a moment. Error: ${error.message}`,
           user_email: 'mentor@ai.assistant',
+          room_id: currentRoom,
           created_at: new Date().toISOString(),
         };
         
@@ -393,34 +490,313 @@ export default function ChatRoom({ user }) {
     }
   };
 
-  return (
-    <div className="max-w-3xl mx-auto flex flex-col h-screen p-4 bg-white">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-4 p-3 rounded-lg bg-gradient-to-r from-blue-50 to-indigo-50 border">
-        <div>
-          <h1 className="text-lg font-bold text-gray-800">MentorAI Chat</h1>
-          <p className="text-sm text-gray-600">Learning together with AI assistance</p>
-        </div>
-        <button
-          onClick={toggleSound}
-          className={`p-2 rounded-full transition-all duration-200 ${
-            soundEnabled 
-              ? 'bg-green-100 text-green-700 hover:bg-green-200' 
-              : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-          }`}
-          title={soundEnabled ? 'Sound notifications ON - Click to disable' : 'Sound notifications OFF - Click to enable'}
-        >
-          <span className="text-lg">
-            {soundEnabled ? '🔔' : '🔕'}
-          </span>
-        </button>
-      </div>
+  // User profile functions
+  const fetchUserProfile = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('user_email', user.email)
+        .single();
+
+      if (!error && data) {
+        setUserProfile(data);
+      }
+    } catch (error) {
+      console.error('Error fetching user profile:', error);
+    }
+  };
+
+  const fetchAllUserProfiles = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('*');
+
+      if (!error && data) {
+        const profilesMap = {};
+        data.forEach(profile => {
+          profilesMap[profile.user_email] = profile;
+        });
+        setUserProfiles(profilesMap);
+      }
+    } catch (error) {
+      console.error('Error fetching user profiles:', error);
+    }
+  };
+
+  const handleProfileUpdate = (updatedProfile) => {
+    setUserProfile(updatedProfile);
+    setUserProfiles(prev => ({
+      ...prev,
+      [updatedProfile.user_email]: updatedProfile
+    }));
+  };
+
+  // Room management functions
+  const fetchRooms = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('chat_rooms')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching rooms:', error);
+      } else {
+        setRooms(data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching rooms:', error);
+    }
+  };
+
+  const createRoom = async () => {
+    if (!newRoomName.trim()) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('chat_rooms')
+        .insert([{
+          id: uuidv4(),
+          name: newRoomName.trim(),
+          created_by: user.email,
+          created_at: new Date().toISOString()
+        }])
+        .select();
+
+      if (error) {
+        console.error('Error creating room:', error);
+      } else {
+        setNewRoomName('');
+        setShowRoomModal(false);
+        fetchRooms();
+        // Switch to the new room
+        setCurrentRoom(data[0].id);
+      }
+    } catch (error) {
+      console.error('Error creating room:', error);
+    }
+  };
+
+  const switchRoom = (roomId) => {
+    setCurrentRoom(roomId);
+    setMessages([]); // Clear current messages
+  };
+
+  // File upload functionality
+  const handleFileUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // Check file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File size must be less than 10MB');
+      return;
+    }
+
+    setUploadingFile(true);
+
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${user.id}/${uuidv4()}.${fileExt}`;
+
+      // Upload file to Supabase storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('message-files')
+        .upload(fileName, file);
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('message-files')
+        .getPublicUrl(fileName);
+
+      // Send message with file info
+      const message = {
+        id: uuidv4(),
+        content: `Shared a file: ${file.name}`,
+        user_email: user.email,
+        room_id: currentRoom,
+        created_at: new Date().toISOString(),
+        file_url: urlData.publicUrl,
+        file_name: file.name,
+        file_type: file.type,
+        file_size: file.size
+      };
+
+      // Add message to UI immediately
+      setMessages(prev => [...prev, message]);
       
-      <div className="flex-1 overflow-y-auto space-y-3 mb-4">
-        {messages.map((msg) => {
+      // Insert to database
+      await supabase.from("messages").insert([message]);
+
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      alert('Failed to upload file. Please try again.');
+    } finally {
+      setUploadingFile(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Trigger file upload
+  const triggerFileUpload = () => {
+    fileInputRef.current?.click();
+  };
+
+  // Search functionality
+  const searchMessages = async (query) => {
+    if (!query.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('room_id', currentRoom)
+        .ilike('content', `%${query}%`)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (!error) setSearchResults(data || []);
+    } catch (error) {
+      console.error('Search error:', error);
+    }
+  };
+
+  return (
+    <div className="flex h-screen bg-white">
+      {/* Rooms Sidebar */}
+      <div className="w-64 bg-gray-50 border-r border-gray-200 flex flex-col">
+        <div className="p-4 border-b border-gray-200">
+          <h2 className="text-lg font-bold text-gray-800">Chat Rooms</h2>
+          <button
+            onClick={() => setShowRoomModal(true)}
+            className="mt-2 w-full bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 text-sm"
+          >
+            + Create Room
+          </button>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto p-2">
+          {rooms.map(room => (
+            <button
+              key={room.id}
+              onClick={() => switchRoom(room.id)}
+              className={`w-full text-left p-3 rounded-lg mb-2 transition-colors ${
+                currentRoom === room.id
+                  ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                  : 'hover:bg-gray-100 text-gray-700'
+              }`}
+            >
+              <div className="font-medium"># {room.name}</div>
+              <div className="text-xs text-gray-500">
+                Created by {room.created_by?.split('@')[0]}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="flex justify-between items-center p-4 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+          <div>
+            <h1 className="text-lg font-bold text-gray-800">
+              # {rooms.find(r => r.id === currentRoom)?.name || 'General'}
+            </h1>
+            <p className="text-sm text-gray-600">
+              Welcome, {getAvatar(user.email)} {getDisplayName(user.email)}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowSearch(!showSearch)}
+              className={`p-2 rounded-full transition-all duration-200 ${
+                showSearch
+                  ? 'bg-purple-100 text-purple-700 hover:bg-purple-200' 
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+              title="Search messages"
+            >
+              <span className="text-lg">🔍</span>
+            </button>
+            <button
+              onClick={() => setShowProfileModal(true)}
+              className="p-2 rounded-full bg-blue-100 text-blue-700 hover:bg-blue-200 transition-all duration-200"
+              title="Edit your profile"
+            >
+              <span className="text-lg">👤</span>
+            </button>
+            <button
+              onClick={toggleSound}
+              className={`p-2 rounded-full transition-all duration-200 ${
+                soundEnabled 
+                  ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+              }`}
+              title={soundEnabled ? 'Sound notifications ON - Click to disable' : 'Sound notifications OFF - Click to enable'}
+            >
+              <span className="text-lg">
+                {soundEnabled ? '🔔' : '🔕'}
+              </span>
+            </button>
+          </div>
+        </div>
+        
+        {/* Search Interface */}
+        {showSearch && (
+          <div className="border-b border-gray-200 bg-gray-50 p-4">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  searchMessages(e.target.value);
+                }}
+                className="flex-1 p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                placeholder="Search messages in this room..."
+              />
+              <button
+                onClick={() => {
+                  setSearchQuery("");
+                  setSearchResults([]);
+                  setShowSearch(false);
+                }}
+                className="bg-gray-200 text-gray-600 px-4 rounded-lg hover:bg-gray-300"
+              >
+                Clear
+              </button>
+            </div>
+            {searchResults.length > 0 && (
+              <div className="mt-2 max-h-32 overflow-y-auto">
+                <p className="text-sm text-gray-600 mb-2">Found {searchResults.length} messages:</p>
+                {searchResults.slice(0, 5).map(result => (
+                  <div key={result.id} className="text-xs bg-white p-2 rounded border mb-1">
+                    <span className="font-medium">{getDisplayName(result.user_email)}:</span> {result.content.substring(0, 100)}...
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Messages Area */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {messages.map((msg) => {
           const isMentorAI = msg.user_email === 'mentor@ai.assistant' || msg.user_email === 'mentorai@assistant' || msg.user_email === 'mentor@ai';
           const isCurrentUser = msg.user_email === user.email;
-          const userReaction = msg.reactions?.[user.email] || null;
+          const messageReactions = reactions[msg.id] || {};
 
           return (
             <div
@@ -434,11 +810,14 @@ export default function ChatRoom({ user }) {
               }`}
             >
               <div className="flex justify-between items-start mb-2">
-                <p className={`text-xs font-medium ${
-                  isMentorAI ? "text-emerald-700" : "text-gray-600"
-                }`}>
-                  {isMentorAI ? "🧠 MentorAI" : msg.user_email}
-                </p>
+                <div className="flex items-center gap-1">
+                  <span className="text-sm">{getAvatar(msg.user_email)}</span>
+                  <p className={`text-xs font-medium ${
+                    isMentorAI ? "text-emerald-700" : "text-gray-600"
+                  }`}>
+                    {getDisplayName(msg.user_email)}
+                  </p>
+                </div>
                 <div className="flex items-center gap-2">
                   <p className="text-xs text-gray-500">
                     {formatTimestamp(msg.created_at)}
@@ -593,59 +972,92 @@ export default function ChatRoom({ user }) {
                   </ReactMarkdown>
                 </div>
               ) : (
-                <p className="text-gray-800 leading-relaxed">
-                  {msg.content || msg.text}
-                </p>
+                <div>
+                  <p className="text-gray-800 leading-relaxed">
+                    {msg.content || msg.text}
+                  </p>
+                  
+                  {/* File display */}
+                  {msg.file_url && (
+                    <div className="mt-2 p-3 bg-gray-50 rounded-lg border">
+                      {msg.file_type?.startsWith('image/') ? (
+                        <div>
+                          <img 
+                            src={msg.file_url} 
+                            alt={msg.file_name}
+                            className="max-w-sm max-h-64 rounded-lg cursor-pointer hover:opacity-90"
+                            onClick={() => window.open(msg.file_url, '_blank')}
+                          />
+                          <p className="text-xs text-gray-500 mt-1">{msg.file_name}</p>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className="text-2xl">📄</span>
+                          <div>
+                            <a 
+                              href={msg.file_url} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:text-blue-800 font-medium"
+                            >
+                              {msg.file_name}
+                            </a>
+                            <p className="text-xs text-gray-500">
+                              {(msg.file_size / 1024 / 1024).toFixed(2)} MB
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Reactions */}
               <div className="flex items-center gap-2 mt-2">
-                {/* Reaction buttons */}
-                <div className="flex gap-1">
-                  {availableEmojis.map(emoji => {
-                    const isActive = userReaction === emoji;
+                {/* Show existing reactions with counts */}
+                <div className="flex gap-1 flex-wrap">
+                  {Object.entries(messageReactions).map(([emoji, userEmails]) => {
+                    const count = userEmails.length;
+                    const userHasReacted = userEmails.includes(user.email);
                     return (
                       <button
                         key={emoji}
                         onClick={() => handleEmojiClick(msg.id, emoji)}
-                        className={`text-xl transition-transform ${
-                          isActive ? 'scale-110 text-emerald-600' : 'text-gray-500 hover:text-emerald-600'
+                        className={`flex items-center gap-1 px-2 py-1 rounded-full text-sm transition-all ${
+                          userHasReacted 
+                            ? 'bg-emerald-100 text-emerald-700 border border-emerald-300' 
+                            : 'bg-gray-100 text-gray-600 hover:bg-emerald-50 hover:text-emerald-600'
                         }`}
-                        title={isActive ? 'Remove reaction' : 'React with ' + emoji}
+                        title={`${count} reaction${count > 1 ? 's' : ''}`}
                       >
-                        {emoji}
+                        <span>{emoji}</span>
+                        <span className="text-xs">{count}</span>
                       </button>
                     );
                   })}
                 </div>
                 
-                {/* Show current user's reaction */}
-                {userReaction && (
-                  <p className="text-xs text-gray-600">
-                    You reacted with: <span className="text-emerald-600">{userReaction}</span>
-                  </p>
-                )}
-                
-                {/* Toggle emoji picker */}
+                {/* Add reaction button */}
                 <button
                   onClick={() => toggleEmojiPicker(msg.id)}
-                  className="text-gray-500 hover:text-emerald-600 transition-colors"
+                  className="text-gray-400 hover:text-emerald-600 transition-colors text-sm px-2 py-1 rounded hover:bg-gray-100"
                   title="Add a reaction"
                 >
-                  {showEmojiPicker === msg.id ? '▼' : '▲'} Reactions
+                  {showEmojiPicker === msg.id ? '−' : '+'} 😊
                 </button>
               </div>
               
-              {/* Emoji picker (hidden by default) */}
+              {/* Emoji picker */}
               {showEmojiPicker === msg.id && (
-                <div className="mt-2">
-                  <div className="flex gap-1">
+                <div className="mt-2 p-2 bg-gray-50 rounded-lg border">
+                  <div className="flex gap-1 flex-wrap">
                     {availableEmojis.map(emoji => (
                       <button
                         key={emoji}
                         onClick={() => handleEmojiClick(msg.id, emoji)}
-                        className="text-2xl"
-                        title={'React with ' + emoji}
+                        className="text-2xl hover:scale-110 transition-transform p-1 rounded hover:bg-white"
+                        title={`React with ${emoji}`}
                       >
                         {emoji}
                       </button>
@@ -717,17 +1129,45 @@ export default function ChatRoom({ user }) {
             </p>
           </div>
         )}
+
+        {/* Typing indicators */}
+        {Object.keys(typingUsers).length > 0 && (
+          <div className="bg-gray-50 border p-3 rounded-xl">
+            <p className="text-sm text-gray-600 italic flex items-center">
+              <span className="mr-2">
+                {Object.values(typingUsers).join(', ')} {Object.keys(typingUsers).length === 1 ? 'is' : 'are'} typing
+              </span>
+              <span className="flex space-x-1">
+                <span className="w-1 h-1 bg-gray-400 rounded-full animate-bounce"></span>
+                <span className="w-1 h-1 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></span>
+                <span className="w-1 h-1 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></span>
+              </span>
+            </p>
+          </div>
+        )}
         
         <div ref={bottomRef} />
       </div>
 
       <div className="space-y-2">
         <div className="flex gap-2">
+          <button
+            onClick={triggerFileUpload}
+            disabled={uploadingFile}
+            className="bg-gray-100 text-gray-600 px-3 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+            title="Upload file"
+          >
+            {uploadingFile ? (
+              <span className="animate-spin">⏳</span>
+            ) : (
+              <span>📎</span>
+            )}
+          </button>
           <input
             className="flex-1 p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 placeholder-gray-500"
             placeholder="Type a message... (Enter to send, Ctrl+M for @mentor, Esc to clear)"
             value={newMsg}
-            onChange={(e) => setNewMsg(e.target.value)}
+            onChange={(e) => handleTypingChange(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={isAiLoading}
           />
@@ -747,9 +1187,58 @@ export default function ChatRoom({ user }) {
         )}
         
         <div className="text-xs text-gray-500 text-center">
-          💡 <strong>Features:</strong> Enter to send • Ctrl+M for @mentor • Esc to clear • 📋 Copy AI • ✏️ Edit your messages • 🗑️ Delete messages • 🔔 Sound notifications
+          💡 <strong>Features:</strong> Enter to send • Ctrl+M for @mentor • Esc to clear • 📎 Upload files • � Search messages • �📋 Copy AI • ✏️ Edit your messages • 🗑️ Delete messages • 🔔 Sound notifications • 👤 Edit profile • 😄 React with emojis • ⌨️ Typing indicators
+        </div>
         </div>
       </div>
+
+      {/* Profile modal */}
+      {showProfileModal && (
+        <ProfileModal 
+          user={user}
+          userProfile={userProfile}
+          onClose={() => setShowProfileModal(false)}
+          onUpdate={handleProfileUpdate}
+        />
+      )}
+
+      {/* Room modal */}
+      {showRoomModal && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-50">
+          <div className="bg-white rounded-lg shadow-lg p-6 max-w-sm w-full">
+            <h2 className="text-lg font-semibold text-gray-800 mb-4">Create New Room</h2>
+            <input
+              type="text"
+              value={newRoomName}
+              onChange={(e) => setNewRoomName(e.target.value)}
+              className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
+              placeholder="Enter room name..."
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowRoomModal(false)}
+                className="px-4 py-2 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all duration-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={createRoom}
+                className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-all duration-200"
+              >
+                Create Room
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* File input (hidden) */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileUpload}
+        className="hidden"
+      />
     </div>
   );
 }
