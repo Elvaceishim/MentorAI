@@ -10,7 +10,120 @@ export default function ChatRoom({ user }) {
   const [newMsg, setNewMsg] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [copiedId, setCopiedId] = useState(null);
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    const saved = localStorage.getItem('mentorAI_soundEnabled');
+    return saved !== null ? JSON.parse(saved) : true;
+  });
+  const [reactions, setReactions] = useState({});
+  const [showEmojiPicker, setShowEmojiPicker] = useState(null);
+  const [editingMessage, setEditingMessage] = useState(null);
+  const [editContent, setEditContent] = useState("");
   const bottomRef = useRef();
+
+  // Available emoji reactions
+  const availableEmojis = ['👍', '❤️', '😄', '😮', '😢', '😡', '🎉', '🤔'];
+
+  // Sound notification function
+  const playNotificationSound = () => {
+    if (soundEnabled) {
+      // Create a simple notification sound using Web Audio API
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+      oscillator.frequency.setValueAtTime(600, audioContext.currentTime + 0.1);
+      
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.3);
+    }
+  };
+
+  // Toggle sound notifications
+  const toggleSound = () => {
+    const newSoundState = !soundEnabled;
+    setSoundEnabled(newSoundState);
+    localStorage.setItem('mentorAI_soundEnabled', JSON.stringify(newSoundState));
+  };
+
+  // Add reaction to message
+  const addReaction = async (messageId, emoji) => {
+    try {
+      const { data, error } = await supabase
+        .from('message_reactions')
+        .insert([{
+          message_id: messageId,
+          user_email: user.email,
+          emoji: emoji,
+          created_at: new Date().toISOString()
+        }]);
+
+      if (error) {
+        console.error('Error adding reaction:', error);
+      } else {
+        // Update local reactions state
+        fetchReactions();
+      }
+    } catch (error) {
+      console.error('Error adding reaction:', error);
+    }
+    setShowEmojiPicker(null);
+  };
+
+  // Remove reaction from message
+  const removeReaction = async (messageId, emoji) => {
+    try {
+      const { error } = await supabase
+        .from('message_reactions')
+        .delete()
+        .eq('message_id', messageId)
+        .eq('user_email', user.email)
+        .eq('emoji', emoji);
+
+      if (error) {
+        console.error('Error removing reaction:', error);
+      } else {
+        // Update local reactions state
+        fetchReactions();
+      }
+    } catch (error) {
+      console.error('Error removing reaction:', error);
+    }
+  };
+
+  // Fetch reactions for all messages
+  const fetchReactions = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('message_reactions')
+        .select('*');
+
+      if (error) {
+        console.error('Error fetching reactions:', error);
+      } else {
+        // Group reactions by message_id and emoji
+        const groupedReactions = {};
+        data.forEach(reaction => {
+          if (!groupedReactions[reaction.message_id]) {
+            groupedReactions[reaction.message_id] = {};
+          }
+          if (!groupedReactions[reaction.message_id][reaction.emoji]) {
+            groupedReactions[reaction.message_id][reaction.emoji] = [];
+          }
+          groupedReactions[reaction.message_id][reaction.emoji].push(reaction.user_email);
+        });
+        setReactions(groupedReactions);
+      }
+    } catch (error) {
+      console.error('Error fetching reactions:', error);
+    }
+  };
 
   // Helper function to copy AI response
   const copyAIResponse = async (messageId, content) => {
@@ -55,6 +168,7 @@ export default function ChatRoom({ user }) {
     };
     
     fetchMessages();
+    fetchReactions();
 
     // Listen for new messages
     const subscription = supabase
@@ -69,13 +183,34 @@ export default function ChatRoom({ user }) {
             if (exists) {
               return prev; // Don't add duplicate
             }
+            
+            // Play notification sound for messages from other users
+            if (payload.new.user_email !== user.email) {
+              playNotificationSound();
+            }
+            
             return [...prev, payload.new];
           });
         }
       )
       .subscribe();
 
-    return () => supabase.removeChannel(subscription);
+    // Listen for reaction changes
+    const reactionSubscription = supabase
+      .channel("reactions")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "message_reactions" },
+        () => {
+          fetchReactions();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+      supabase.removeChannel(reactionSubscription);
+    };
   }, [user]);
 
   // Enhanced keyboard shortcut handler
@@ -182,6 +317,82 @@ export default function ChatRoom({ user }) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }
 
+  // Toggle emoji picker visibility
+  const toggleEmojiPicker = (messageId) => {
+    setShowEmojiPicker(prev => prev === messageId ? null : messageId);
+  };
+
+  // Handle emoji reaction click
+  const handleEmojiClick = async (messageId, emoji) => {
+    // Check if user already reacted with this emoji
+    const messageReactions = reactions[messageId] || {};
+    const userHasReacted = messageReactions[emoji]?.includes(user.email);
+    
+    if (userHasReacted) {
+      removeReaction(messageId, emoji);
+    } else {
+      addReaction(messageId, emoji);
+    }
+  };
+
+  // Message editing and deletion
+  const startEdit = (messageId, currentContent) => {
+    setEditingMessage(messageId);
+    setEditContent(currentContent);
+  };
+
+  const cancelEdit = () => {
+    setEditingMessage(null);
+    setEditContent("");
+  };
+
+  const saveEdit = async (messageId) => {
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .update({ 
+          content: editContent,
+          edited_at: new Date().toISOString()
+        })
+        .eq('id', messageId);
+
+      if (error) {
+        console.error('Error updating message:', error);
+      } else {
+        // Update local state
+        setMessages(prev => prev.map(msg => 
+          msg.id === messageId 
+            ? { ...msg, content: editContent, edited_at: new Date().toISOString() }
+            : msg
+        ));
+        setEditingMessage(null);
+        setEditContent("");
+      }
+    } catch (error) {
+      console.error('Error updating message:', error);
+    }
+  };
+
+  const deleteMessage = async (messageId) => {
+    if (window.confirm('Are you sure you want to delete this message?')) {
+      try {
+        const { error } = await supabase
+          .from('messages')
+          .delete()
+          .eq('id', messageId);
+
+        if (error) {
+          console.error('Error deleting message:', error);
+        } else {
+          // Update local state
+          setMessages(prev => prev.filter(msg => msg.id !== messageId));
+        }
+      } catch (error) {
+        console.error('Error deleting message:', error);
+      }
+    }
+  };
+
   return (
     <div className="max-w-3xl mx-auto flex flex-col h-screen p-4 bg-white">
       {/* Header */}
@@ -190,13 +401,27 @@ export default function ChatRoom({ user }) {
           <h1 className="text-lg font-bold text-gray-800">MentorAI Chat</h1>
           <p className="text-sm text-gray-600">Learning together with AI assistance</p>
         </div>
+        <button
+          onClick={toggleSound}
+          className={`p-2 rounded-full transition-all duration-200 ${
+            soundEnabled 
+              ? 'bg-green-100 text-green-700 hover:bg-green-200' 
+              : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+          }`}
+          title={soundEnabled ? 'Sound notifications ON - Click to disable' : 'Sound notifications OFF - Click to enable'}
+        >
+          <span className="text-lg">
+            {soundEnabled ? '🔔' : '🔕'}
+          </span>
+        </button>
       </div>
       
       <div className="flex-1 overflow-y-auto space-y-3 mb-4">
         {messages.map((msg) => {
           const isMentorAI = msg.user_email === 'mentor@ai.assistant' || msg.user_email === 'mentorai@assistant' || msg.user_email === 'mentor@ai';
           const isCurrentUser = msg.user_email === user.email;
-          
+          const userReaction = msg.reactions?.[user.email] || null;
+
           return (
             <div
               key={msg.id}
@@ -217,6 +442,9 @@ export default function ChatRoom({ user }) {
                 <div className="flex items-center gap-2">
                   <p className="text-xs text-gray-500">
                     {formatTimestamp(msg.created_at)}
+                    {msg.edited_at && (
+                      <span className="text-xs text-gray-400 ml-1">(edited)</span>
+                    )}
                   </p>
                   {isMentorAI && (
                     <button
@@ -231,10 +459,54 @@ export default function ChatRoom({ user }) {
                       {copiedId === msg.id ? '✓ Copied!' : '📋 Copy'}
                     </button>
                   )}
+                  {isCurrentUser && !isMentorAI && (
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => startEdit(msg.id, msg.content)}
+                        className="text-xs px-2 py-1 rounded transition-colors bg-blue-100 text-blue-600 hover:bg-blue-200"
+                        title="Edit message"
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        onClick={() => deleteMessage(msg.id)}
+                        className="text-xs px-2 py-1 rounded transition-colors bg-red-100 text-red-600 hover:bg-red-200"
+                        title="Delete message"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
               
-              {isMentorAI ? (
+              {/* Message content or edit mode */}
+              {editingMessage === msg.id ? (
+                <div className="space-y-2">
+                  <textarea
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                    rows="3"
+                    placeholder="Edit your message..."
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => saveEdit(msg.id)}
+                      className="text-xs px-3 py-1 rounded bg-green-500 text-white hover:bg-green-600"
+                      disabled={!editContent.trim()}
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={cancelEdit}
+                      className="text-xs px-3 py-1 rounded bg-gray-500 text-white hover:bg-gray-600"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : isMentorAI ? (
                 <div className="prose prose-sm max-w-none text-gray-800">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
@@ -325,6 +597,109 @@ export default function ChatRoom({ user }) {
                   {msg.content || msg.text}
                 </p>
               )}
+
+              {/* Reactions */}
+              <div className="flex items-center gap-2 mt-2">
+                {/* Reaction buttons */}
+                <div className="flex gap-1">
+                  {availableEmojis.map(emoji => {
+                    const isActive = userReaction === emoji;
+                    return (
+                      <button
+                        key={emoji}
+                        onClick={() => handleEmojiClick(msg.id, emoji)}
+                        className={`text-xl transition-transform ${
+                          isActive ? 'scale-110 text-emerald-600' : 'text-gray-500 hover:text-emerald-600'
+                        }`}
+                        title={isActive ? 'Remove reaction' : 'React with ' + emoji}
+                      >
+                        {emoji}
+                      </button>
+                    );
+                  })}
+                </div>
+                
+                {/* Show current user's reaction */}
+                {userReaction && (
+                  <p className="text-xs text-gray-600">
+                    You reacted with: <span className="text-emerald-600">{userReaction}</span>
+                  </p>
+                )}
+                
+                {/* Toggle emoji picker */}
+                <button
+                  onClick={() => toggleEmojiPicker(msg.id)}
+                  className="text-gray-500 hover:text-emerald-600 transition-colors"
+                  title="Add a reaction"
+                >
+                  {showEmojiPicker === msg.id ? '▼' : '▲'} Reactions
+                </button>
+              </div>
+              
+              {/* Emoji picker (hidden by default) */}
+              {showEmojiPicker === msg.id && (
+                <div className="mt-2">
+                  <div className="flex gap-1">
+                    {availableEmojis.map(emoji => (
+                      <button
+                        key={emoji}
+                        onClick={() => handleEmojiClick(msg.id, emoji)}
+                        className="text-2xl"
+                        title={'React with ' + emoji}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Edit and delete for own messages */}
+              {isCurrentUser && (
+                <div className="flex gap-2 mt-3">
+                  <button
+                    onClick={() => startEdit(msg.id, msg.content)}
+                    className="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded hover:bg-blue-200 transition-colors"
+                    title="Edit message"
+                  >
+                    ✏️ Edit
+                  </button>
+                  <button
+                    onClick={() => deleteMessage(msg.id)}
+                    className="text-xs bg-red-100 text-red-700 px-3 py-1 rounded hover:bg-red-200 transition-colors"
+                    title="Delete message"
+                  >
+                    🗑️ Delete
+                  </button>
+                </div>
+              )}
+
+              {/* Edit message input (shown only when editing) */}
+              {editingMessage === msg.id && (
+                <div className="mt-2">
+                  <textarea
+                    className="w-full p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 placeholder-gray-500 resize-none"
+                    rows="2"
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    placeholder="Edit your message..."
+                  />
+                  <div className="flex justify-end gap-2 mt-2">
+                    <button
+                      onClick={() => saveEdit(msg.id)}
+                      className="bg-blue-600 text-white px-4 py-1 rounded-lg hover:bg-blue-700"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={cancelEdit}
+                      className="bg-gray-300 text-gray-700 px-4 py-1 rounded-lg hover:bg-gray-400"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
@@ -372,7 +747,7 @@ export default function ChatRoom({ user }) {
         )}
         
         <div className="text-xs text-gray-500 text-center">
-          💡 <strong>Shortcuts:</strong> Enter to send • Ctrl+M to add @mentor • Esc to clear • Click 📋 to copy AI responses
+          💡 <strong>Features:</strong> Enter to send • Ctrl+M for @mentor • Esc to clear • 📋 Copy AI • ✏️ Edit your messages • 🗑️ Delete messages • 🔔 Sound notifications
         </div>
       </div>
     </div>
