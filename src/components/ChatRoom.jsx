@@ -189,17 +189,25 @@ export default function ChatRoom({ user }) {
   useEffect(() => {
     // Fetch existing messages for current room
     const fetchMessages = async () => {
-      const { data, error } = await supabase
-        .from("messages")
-        .select("*")
-        .eq("room_id", currentRoom)
-        .order("created_at", { ascending: true });
-      
-      if (error) {
+      try {
+        const { data, error } = await supabase
+          .from("messages")
+          .select("*")
+          .eq("room_id", currentRoom)
+          .order("created_at", { ascending: true });
+        
+        if (error) {
+          console.error('Error fetching messages:', error);
+        } else {
+          setMessages(data || []);
+        }
+      } catch (error) {
         console.error('Error fetching messages:', error);
       }
-      setMessages(data || []);
     };
+    
+    // Clear current messages when switching rooms
+    setMessages([]);
     
     fetchMessages();
     fetchReactions();
@@ -249,6 +257,18 @@ export default function ChatRoom({ user }) {
       )
       .subscribe();
 
+    // Listen for room changes
+    const roomSubscription = supabase
+      .channel("rooms")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "chat_rooms" },
+        () => {
+          fetchRooms();
+        }
+      )
+      .subscribe();
+
     // Listen for typing indicators
     const typingSubscription = supabase
       .channel(`typing-${currentRoom}`)
@@ -275,6 +295,7 @@ export default function ChatRoom({ user }) {
     return () => {
       supabase.removeChannel(subscription);
       supabase.removeChannel(reactionSubscription);
+      supabase.removeChannel(roomSubscription);
       supabase.removeChannel(typingSubscription);
     };
   }, [user, currentRoom]);
@@ -503,6 +524,29 @@ export default function ChatRoom({ user }) {
         }
       } catch (error) {
         console.error('Error deleting message:', error);
+      }
+    }
+  };
+
+  // Clear chat history function
+  const clearChatHistory = async () => {
+    if (window.confirm('Are you sure you want to clear all messages in this room? This action cannot be undone.')) {
+      try {
+        const { error } = await supabase
+          .from('messages')
+          .delete()
+          .eq('room_id', currentRoom);
+
+        if (error) {
+          console.error('Error clearing chat history:', error);
+          alert('Failed to clear chat history. Please try again.');
+        } else {
+          setMessages([]);
+          alert('Chat history cleared successfully.');
+        }
+      } catch (error) {
+        console.error('Error clearing chat history:', error);
+        alert('Failed to clear chat history. Please try again.');
       }
     }
   };
@@ -746,6 +790,13 @@ export default function ChatRoom({ user }) {
               title="Search messages"
             >
               <span className="text-lg">🔍</span>
+            </button>
+            <button
+              onClick={clearChatHistory}
+              className="p-2 rounded-full bg-red-100 text-red-700 hover:bg-red-200 transition-all duration-200"
+              title="Clear chat history"
+            >
+              <span className="text-lg">🗑️</span>
             </button>
             <button
               onClick={() => setShowProfileModal(true)}
@@ -1204,7 +1255,7 @@ export default function ChatRoom({ user }) {
         )}
         
         <div className="text-xs text-gray-500 text-center">
-          💡 <strong>Features:</strong> Enter to send • Ctrl+M for @mentor • Esc to clear • 📎 Upload files • � Search messages • �📋 Copy AI • ✏️ Edit your messages • 🗑️ Delete messages • 🔔 Sound notifications • 👤 Edit profile • 😄 React with emojis • ⌨️ Typing indicators
+          💡 <strong>Features:</strong> Enter to send • Ctrl+M for @mentor • Esc to clear • 📎 Upload files • 🔍 Search messages • 🗑️ Clear chat • 📋 Copy AI • ✏️ Edit your messages • 🗑️ Delete messages • 🔔 Sound notifications • 👤 Edit profile • 😄 React with emojis • ⌨️ Typing indicators
         </div>
         </div>
       </div>
