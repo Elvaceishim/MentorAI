@@ -9,7 +9,36 @@ export default function ChatRoom({ user }) {
   const [messages, setMessages] = useState([]);
   const [newMsg, setNewMsg] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
   const bottomRef = useRef();
+
+  // Helper function to copy AI response
+  const copyAIResponse = async (messageId, content) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedId(messageId);
+      // Reset after 2 seconds
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  // Helper function to format timestamps
+  const formatTimestamp = (timestamp) => {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffInHours = (now - date) / (1000 * 60 * 60);
+    
+    if (diffInHours < 24) {
+      // Show time for messages from today
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } else {
+      // Show date and time for older messages
+      return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + 
+             date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+  };
 
   useEffect(() => {
     // Fetch existing messages
@@ -48,6 +77,28 @@ export default function ChatRoom({ user }) {
 
     return () => supabase.removeChannel(subscription);
   }, [user]);
+
+  // Enhanced keyboard shortcut handler
+  const handleKeyDown = (e) => {
+    // Send message: Enter (without Shift)
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+    
+    // Quick @mentor insertion: Ctrl/Cmd + M
+    if ((e.ctrlKey || e.metaKey) && e.key === 'm') {
+      e.preventDefault();
+      if (!newMsg.includes('@mentor')) {
+        setNewMsg(prev => '@mentor, ' + prev);
+      }
+    }
+    
+    // Clear input: Escape
+    if (e.key === 'Escape') {
+      setNewMsg('');
+    }
+  };
 
   async function sendMessage() {
     if (!newMsg.trim()) return;
@@ -149,11 +200,31 @@ export default function ChatRoom({ user }) {
                   : "bg-gray-100 text-left mr-12 shadow-sm"
               }`}
             >
-              <p className={`text-xs mb-2 font-medium ${
-                isMentorAI ? "text-emerald-700" : "text-gray-600"
-              }`}>
-                {isMentorAI ? "� MentorAI" : msg.user_email}
-              </p>
+              <div className="flex justify-between items-start mb-2">
+                <p className={`text-xs font-medium ${
+                  isMentorAI ? "text-emerald-700" : "text-gray-600"
+                }`}>
+                  {isMentorAI ? "� MentorAI" : msg.user_email}
+                </p>
+                <div className="flex items-center gap-2">
+                  <p className="text-xs text-gray-500">
+                    {formatTimestamp(msg.created_at)}
+                  </p>
+                  {isMentorAI && (
+                    <button
+                      onClick={() => copyAIResponse(msg.id, msg.content)}
+                      className={`text-xs px-2 py-1 rounded transition-colors ${
+                        copiedId === msg.id
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-gray-100 text-gray-600 hover:bg-emerald-50 hover:text-emerald-600'
+                      }`}
+                      title="Copy AI response"
+                    >
+                      {copiedId === msg.id ? '✓ Copied!' : '📋 Copy'}
+                    </button>
+                  )}
+                </div>
+              </div>
               
               {isMentorAI ? (
                 <div className="prose prose-sm max-w-none text-gray-800">
@@ -271,10 +342,10 @@ export default function ChatRoom({ user }) {
         <div className="flex gap-2">
           <input
             className="flex-1 p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="Type a message... (use @mentor to ask MentorAI about anything you're curious about!)"
+            placeholder="Type a message... (Enter to send, Ctrl+M for @mentor, Esc to clear)"
             value={newMsg}
             onChange={(e) => setNewMsg(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
+            onKeyDown={handleKeyDown}
             disabled={isAiLoading}
           />
           <button
@@ -291,6 +362,10 @@ export default function ChatRoom({ user }) {
             <span className="font-medium">🧠 MentorAI Ready!</span> Ask me anything - tech questions, cooking tips, life advice, or general knowledge!
           </div>
         )}
+        
+        <div className="text-xs text-gray-500 text-center">
+          💡 <strong>Shortcuts:</strong> Enter to send • Ctrl+M to add @mentor • Esc to clear • Click 📋 to copy AI responses
+        </div>
       </div>
     </div>
   );
