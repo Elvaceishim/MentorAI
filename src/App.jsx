@@ -19,9 +19,11 @@ function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  if (!user) return <Login onLogin={setUser} />;
-
-  return <ChatRoom user={user} />;
+  return (
+    <>
+      {!user ? <Login onLogin={setUser} /> : <ChatRoom user={user} />}
+    </>
+  );
 }
 
 export default App;

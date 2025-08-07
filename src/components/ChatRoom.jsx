@@ -183,7 +183,15 @@ export default function ChatRoom({ user }) {
   }
 
   return (
-    <div className="max-w-3xl mx-auto flex flex-col h-screen p-4">
+    <div className="max-w-3xl mx-auto flex flex-col h-screen p-4 bg-white">
+      {/* Header */}
+      <div className="flex justify-between items-center mb-4 p-3 rounded-lg bg-gradient-to-r from-blue-50 to-indigo-50 border">
+        <div>
+          <h1 className="text-lg font-bold text-gray-800">MentorAI Chat</h1>
+          <p className="text-sm text-gray-600">Learning together with AI assistance</p>
+        </div>
+      </div>
+      
       <div className="flex-1 overflow-y-auto space-y-3 mb-4">
         {messages.map((msg) => {
           const isMentorAI = msg.user_email === 'mentor@ai.assistant' || msg.user_email === 'mentorai@assistant' || msg.user_email === 'mentor@ai';
@@ -196,15 +204,15 @@ export default function ChatRoom({ user }) {
                 isMentorAI
                   ? "bg-gradient-to-r from-emerald-50 to-green-50 border border-emerald-200 text-left shadow-sm"
                   : isCurrentUser
-                  ? "bg-blue-100 text-right ml-12 shadow-sm"
-                  : "bg-gray-100 text-left mr-12 shadow-sm"
+                  ? "bg-blue-100 text-right ml-12 shadow-sm border"
+                  : "bg-gray-100 text-left mr-12 shadow-sm border"
               }`}
             >
               <div className="flex justify-between items-start mb-2">
                 <p className={`text-xs font-medium ${
                   isMentorAI ? "text-emerald-700" : "text-gray-600"
                 }`}>
-                  {isMentorAI ? "� MentorAI" : msg.user_email}
+                  {isMentorAI ? "🧠 MentorAI" : msg.user_email}
                 </p>
                 <div className="flex items-center gap-2">
                   <p className="text-xs text-gray-500">
@@ -245,7 +253,7 @@ export default function ChatRoom({ user }) {
                         }
                         return (
                           <div className="my-4">
-                            <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto">
+                            <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg overflow-x-auto border">
                               <code className="text-sm font-mono" {...props}>
                                 {children}
                               </code>
@@ -323,7 +331,7 @@ export default function ChatRoom({ user }) {
         
         {isAiLoading && (
           <div className="bg-gradient-to-r from-emerald-50 to-green-50 border border-emerald-200 text-left p-4 rounded-xl shadow-sm">
-            <p className="text-xs text-emerald-700 font-medium mb-2">� MentorAI</p>
+            <p className="text-xs text-emerald-700 font-medium mb-2">🧠 MentorAI</p>
             <p className="text-emerald-600 italic flex items-center">
               <span className="mr-2">MentorAI is thinking</span>
               <span className="flex space-x-1">
@@ -341,7 +349,7 @@ export default function ChatRoom({ user }) {
       <div className="space-y-2">
         <div className="flex gap-2">
           <input
-            className="flex-1 p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="flex-1 p-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900 placeholder-gray-500"
             placeholder="Type a message... (Enter to send, Ctrl+M for @mentor, Esc to clear)"
             value={newMsg}
             onChange={(e) => setNewMsg(e.target.value)}

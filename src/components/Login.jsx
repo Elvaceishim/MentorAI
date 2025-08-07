@@ -51,7 +51,8 @@ function Login() {
 
   return (
     <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-      <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
+      <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md border">
+        
         <div className="text-center mb-6">
           <h2 className="text-2xl font-bold text-gray-800">
             {isReturningUser ? "Welcome Back!" : "Join the Study Group"}
@@ -67,7 +68,7 @@ function Login() {
           <div>
             <input
               type="email"
-              className="w-full border border-gray-300 rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full border border-gray-300 rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white text-gray-900 placeholder-gray-500"
               placeholder="Enter your email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
