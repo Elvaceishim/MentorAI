@@ -983,44 +983,55 @@ export default function ChatRoom({ user }) {
         </div>
         
         <div className="flex-1 overflow-y-auto p-2">
-          {rooms.map(room => (
-            <div
-              key={room.id}
-              className={`relative group rounded-lg mb-2 transition-colors ${
-                currentRoom === room.id
-                  ? 'bg-blue-100 border border-blue-200'
-                  : 'hover:bg-gray-100'
-              }`}
-            >
-              <button
-                onClick={() => switchRoom(room.id)}
-                className={`w-full text-left p-3 transition-colors ${
+          {rooms.map(room => {
+            const canDelete = room.created_by === user.email || room.created_by === 'system';
+            console.log(`Room: ${room.name}, Created by: ${room.created_by}, User: ${user.email}, Can delete: ${canDelete}`);
+            
+            return (
+              <div
+                key={room.id}
+                className={`relative group rounded-lg mb-2 transition-colors ${
                   currentRoom === room.id
-                    ? 'text-blue-800'
-                    : 'text-gray-700'
+                    ? 'bg-blue-100 border border-blue-200'
+                    : 'hover:bg-gray-100'
                 }`}
               >
-                <div className="font-medium"># {room.name}</div>
-                <div className="text-xs text-gray-500">
-                  Created by {room.created_by?.split('@')[0]}
-                </div>
-              </button>
-              
-              {/* Delete button - only show on hover and if user created the room */}
-              {(room.created_by === user.email || room.created_by === 'system') && (
+                <button
+                  onClick={() => switchRoom(room.id)}
+                  className={`w-full text-left p-3 transition-colors ${
+                    currentRoom === room.id
+                      ? 'text-blue-800'
+                      : 'text-gray-700'
+                  }`}
+                >
+                  <div className="font-medium"># {room.name}</div>
+                  <div className="text-xs text-gray-500">
+                    Created by {room.created_by?.split('@')[0]}
+                  </div>
+                </button>
+                
+                {/* Delete button - TEMPORARILY show for all rooms for debugging */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation(); // Prevent room switching
+                    if (!canDelete) {
+                      alert(`You can only delete rooms you created. This room was created by: ${room.created_by}`);
+                      return;
+                    }
                     initiateDeleteRoom(room);
                   }}
-                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs"
-                  title={`Delete room "${room.name}"`}
+                  className={`absolute top-2 right-2 rounded-full w-6 h-6 flex items-center justify-center text-xs transition-all ${
+                    canDelete 
+                      ? 'bg-red-500 hover:bg-red-600 text-white opacity-70 hover:opacity-100' 
+                      : 'bg-gray-300 text-gray-500 opacity-50 cursor-not-allowed'
+                  }`}
+                  title={canDelete ? `Delete room "${room.name}"` : `Can't delete - created by ${room.created_by}`}
                 >
                   ×
                 </button>
-              )}
-            </div>
-          ))}
+              </div>
+            );
+          })}
         </div>
       </div>
 
