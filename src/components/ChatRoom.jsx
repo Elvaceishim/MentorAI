@@ -744,6 +744,7 @@ export default function ChatRoom({ user }) {
 
     try {
       const roomData = {
+        id: uuidv4(), // Generate UUID for the room
         name: newRoomName.trim(),
         created_by: user.email,
         created_at: new Date().toISOString()
@@ -985,7 +986,6 @@ export default function ChatRoom({ user }) {
         <div className="flex-1 overflow-y-auto p-2">
           {rooms.map(room => {
             const canDelete = room.created_by === user.email || room.created_by === 'system';
-            console.log(`Room: ${room.name}, Created by: ${room.created_by}, User: ${user.email}, Can delete: ${canDelete}`);
             
             return (
               <div
@@ -1010,25 +1010,19 @@ export default function ChatRoom({ user }) {
                   </div>
                 </button>
                 
-                {/* Delete button - TEMPORARILY show for all rooms for debugging */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation(); // Prevent room switching
-                    if (!canDelete) {
-                      alert(`You can only delete rooms you created. This room was created by: ${room.created_by}`);
-                      return;
-                    }
-                    initiateDeleteRoom(room);
-                  }}
-                  className={`absolute top-2 right-2 rounded-full w-6 h-6 flex items-center justify-center text-xs transition-all ${
-                    canDelete 
-                      ? 'bg-red-500 hover:bg-red-600 text-white opacity-70 hover:opacity-100' 
-                      : 'bg-gray-300 text-gray-500 opacity-50 cursor-not-allowed'
-                  }`}
-                  title={canDelete ? `Delete room "${room.name}"` : `Can't delete - created by ${room.created_by}`}
-                >
-                  ×
-                </button>
+                {/* Delete button - show for rooms the user can delete */}
+                {canDelete && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation(); // Prevent room switching
+                      initiateDeleteRoom(room);
+                    }}
+                    className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs transition-all opacity-70 hover:opacity-100"
+                    title={`Delete room "${room.name}"`}
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             );
           })}
