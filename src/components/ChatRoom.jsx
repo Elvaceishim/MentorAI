@@ -24,6 +24,9 @@ export default function ChatRoom({ user }) {
   const [rooms, setRooms] = useState([]);
   const [showRoomModal, setShowRoomModal] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [roomToDelete, setRoomToDelete] = useState(null);
+  const [roomDeleteInfo, setRoomDeleteInfo] = useState({ messageCount: 0 });
   const [uploadingFile, setUploadingFile] = useState(false);
   const [editingMessage, setEditingMessage] = useState(null);
   const [editContent, setEditContent] = useState("");
@@ -776,6 +779,89 @@ export default function ChatRoom({ user }) {
     }
   };
 
+  const initiateDeleteRoom = async (room) => {
+    // Prevent deleting the last room
+    if (rooms.length <= 1) {
+      alert('Cannot delete the last remaining room.');
+      return;
+    }
+    
+    try {
+      // Get message count for this room
+      const { count, error } = await supabase
+        .from('messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('room_id', room.id);
+      
+      setRoomToDelete(room);
+      setRoomDeleteInfo({ messageCount: count || 0 });
+      setShowDeleteModal(true);
+    } catch (error) {
+      console.error('Error fetching room info:', error);
+      setRoomToDelete(room);
+      setRoomDeleteInfo({ messageCount: 0 });
+      setShowDeleteModal(true);
+    }
+  };
+
+  const confirmDeleteRoom = async () => {
+    if (!roomToDelete) return;
+
+    try {
+      // First, delete all messages in the room
+      const { error: messagesError } = await supabase
+        .from('messages')
+        .delete()
+        .eq('room_id', roomToDelete.id);
+
+      if (messagesError) {
+        console.error('Error deleting messages:', messagesError);
+        alert('Error deleting room messages: ' + messagesError.message);
+        return;
+      }
+
+      // Then delete the room itself
+      const { error: roomError } = await supabase
+        .from('chat_rooms')
+        .delete()
+        .eq('id', roomToDelete.id);
+
+      if (roomError) {
+        console.error('Error deleting room:', roomError);
+        alert('Error deleting room: ' + roomError.message);
+        return;
+      }
+
+      // If we deleted the current room, switch to another room
+      if (currentRoom === roomToDelete.id) {
+        const remainingRooms = rooms.filter(room => room.id !== roomToDelete.id);
+        if (remainingRooms.length > 0) {
+          setCurrentRoom(remainingRooms[0].id);
+        }
+      }
+
+      // Clean up modal state
+      setShowDeleteModal(false);
+      setRoomToDelete(null);
+      setRoomDeleteInfo({ messageCount: 0 });
+
+      // Refresh rooms list
+      await fetchRooms();
+      
+      alert('Room deleted successfully.');
+
+    } catch (error) {
+      console.error('Error deleting room:', error);
+      alert('Error deleting room: ' + error.message);
+    }
+  };
+
+  const cancelDeleteRoom = () => {
+    setShowDeleteModal(false);
+    setRoomToDelete(null);
+    setRoomDeleteInfo({ messageCount: 0 });
+  };
+
   // File upload functionality
   const handleFileUpload = async (event) => {
     const file = event.target.files[0];
@@ -898,20 +984,42 @@ export default function ChatRoom({ user }) {
         
         <div className="flex-1 overflow-y-auto p-2">
           {rooms.map(room => (
-            <button
+            <div
               key={room.id}
-              onClick={() => switchRoom(room.id)}
-              className={`w-full text-left p-3 rounded-lg mb-2 transition-colors ${
+              className={`relative group rounded-lg mb-2 transition-colors ${
                 currentRoom === room.id
-                  ? 'bg-blue-100 text-blue-800 border border-blue-200'
-                  : 'hover:bg-gray-100 text-gray-700'
+                  ? 'bg-blue-100 border border-blue-200'
+                  : 'hover:bg-gray-100'
               }`}
             >
-              <div className="font-medium"># {room.name}</div>
-              <div className="text-xs text-gray-500">
-                Created by {room.created_by?.split('@')[0]}
-              </div>
-            </button>
+              <button
+                onClick={() => switchRoom(room.id)}
+                className={`w-full text-left p-3 transition-colors ${
+                  currentRoom === room.id
+                    ? 'text-blue-800'
+                    : 'text-gray-700'
+                }`}
+              >
+                <div className="font-medium"># {room.name}</div>
+                <div className="text-xs text-gray-500">
+                  Created by {room.created_by?.split('@')[0]}
+                </div>
+              </button>
+              
+              {/* Delete button - only show on hover and if user created the room */}
+              {(room.created_by === user.email || room.created_by === 'system') && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation(); // Prevent room switching
+                    initiateDeleteRoom(room);
+                  }}
+                  className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-red-500 hover:bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs"
+                  title={`Delete room "${room.name}"`}
+                >
+                  ×
+                </button>
+              )}
+            </div>
           ))}
         </div>
       </div>
@@ -1458,6 +1566,54 @@ export default function ChatRoom({ user }) {
                 className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-all duration-200"
               >
                 Create Room
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Room Confirmation Modal */}
+      {showDeleteModal && roomToDelete && (
+        <div className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-50">
+          <div className="bg-white rounded-lg shadow-lg p-6 max-w-md w-full mx-4">
+            <div className="flex items-center mb-4">
+              <div className="flex-shrink-0 w-10 h-10 mx-auto bg-red-100 rounded-full flex items-center justify-center">
+                <span className="text-red-600 text-xl">⚠️</span>
+              </div>
+              <div className="ml-4">
+                <h2 className="text-lg font-semibold text-gray-900">Delete Room</h2>
+                <p className="text-sm text-gray-500">This action cannot be undone</p>
+              </div>
+            </div>
+            
+            <div className="mb-6">
+              <p className="text-gray-700 mb-2">
+                Are you sure you want to delete the room <strong>"{roomToDelete.name}"</strong>?
+              </p>
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <p className="text-sm text-red-800">
+                  <strong>Warning:</strong> This will permanently delete:
+                </p>
+                <ul className="text-sm text-red-700 mt-2 list-disc list-inside">
+                  <li>The room itself</li>
+                  <li>{roomDeleteInfo.messageCount} message{roomDeleteInfo.messageCount !== 1 ? 's' : ''} in this room</li>
+                  <li>All reactions on those messages</li>
+                </ul>
+              </div>
+            </div>
+            
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={cancelDeleteRoom}
+                className="px-4 py-2 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-all duration-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteRoom}
+                className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 transition-all duration-200"
+              >
+                Delete Room
               </button>
             </div>
           </div>
