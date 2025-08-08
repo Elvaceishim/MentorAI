@@ -32,6 +32,8 @@ export default function ChatRoom({ user }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [showSearch, setShowSearch] = useState(false);
+  const [dbSetupComplete, setDbSetupComplete] = useState(false);
+  const [setupError, setSetupError] = useState(null);
   const fileInputRef = useRef();
   const bottomRef = useRef();
   const typingTimeoutRef = useRef();
@@ -186,7 +188,32 @@ export default function ChatRoom({ user }) {
     return profile?.avatar_emoji || '👤';
   };
 
+  // Check if database is properly set up
+  const checkDatabaseSetup = async () => {
+    try {
+      // Test if required tables exist by trying to fetch from them
+      const [roomsTest, reactionsTest] = await Promise.all([
+        supabase.from('chat_rooms').select('id').limit(1),
+        supabase.from('message_reactions').select('id').limit(1)
+      ]);
+      
+      if (roomsTest.error || reactionsTest.error) {
+        setSetupError('Database tables not set up. Please run the SQL setup script.');
+        setDbSetupComplete(false);
+      } else {
+        setDbSetupComplete(true);
+        setSetupError(null);
+      }
+    } catch (error) {
+      setSetupError('Database connection error. Please check your setup.');
+      setDbSetupComplete(false);
+    }
+  };
+
   useEffect(() => {
+    // Check database setup first
+    checkDatabaseSetup();
+    
     // Fetch existing messages for current room
     const fetchMessages = async () => {
       try {
@@ -198,6 +225,9 @@ export default function ChatRoom({ user }) {
         
         if (error) {
           console.error('Error fetching messages:', error);
+          if (error.code === '42703') {
+            setSetupError('Database column missing. Please run the SQL setup script.');
+          }
         } else {
           setMessages(data || []);
         }
@@ -211,6 +241,7 @@ export default function ChatRoom({ user }) {
     fetchUserProfile();
     fetchAllUserProfiles();
     fetchRooms();
+    checkDatabaseSetup();
 
     // Listen for new messages in current room
     const subscription = supabase
@@ -666,6 +697,9 @@ export default function ChatRoom({ user }) {
 
       if (error) {
         console.error('Error fetching rooms:', error);
+        if (error.code === '42P01') {
+          setSetupError('chat_rooms table missing. Please run the SQL setup script.');
+        }
       } else {
         setRooms(data || []);
       }
@@ -799,6 +833,24 @@ export default function ChatRoom({ user }) {
 
   return (
     <div className="flex h-screen bg-white">
+      {/* Database Setup Notice */}
+      {setupError && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-red-500 text-white p-4 text-center">
+          <div className="max-w-4xl mx-auto">
+            <p className="font-semibold">⚠️ Database Setup Required</p>
+            <p className="text-sm mt-1">
+              {setupError} Please check the DATABASE_SETUP_GUIDE.md file for instructions.
+            </p>
+            <button 
+              onClick={checkDatabaseSetup}
+              className="mt-2 bg-red-700 hover:bg-red-800 px-3 py-1 rounded text-sm"
+            >
+              Retry Connection
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Rooms Sidebar */}
       <div className="w-64 bg-gray-50 border-r border-gray-200 flex flex-col">
         <div className="p-4 border-b border-gray-200">
