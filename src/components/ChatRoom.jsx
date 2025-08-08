@@ -20,7 +20,7 @@ export default function ChatRoom({ user }) {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [userProfile, setUserProfile] = useState(null);
   const [userProfiles, setUserProfiles] = useState({});
-  const [currentRoom, setCurrentRoom] = useState('general');
+  const [currentRoom, setCurrentRoom] = useState(null); // Start with null, will be set after rooms load
   const [rooms, setRooms] = useState([]);
   const [showRoomModal, setShowRoomModal] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
@@ -191,6 +191,20 @@ export default function ChatRoom({ user }) {
   // Check if database is properly set up
   const checkDatabaseSetup = async () => {
     try {
+      console.log('Checking database setup...');
+      
+      // Test basic connection
+      const { data: test, error: testError } = await supabase
+        .from('messages')
+        .select('id')
+        .limit(1);
+      
+      if (testError) {
+        console.error('Basic connection test failed:', testError);
+        setSetupError('Database connection failed: ' + testError.message);
+        return;
+      }
+      
       // Test if required tables exist by trying to fetch from them
       const [roomsTest, reactionsTest] = await Promise.all([
         supabase.from('chat_rooms').select('id').limit(1),
@@ -198,13 +212,16 @@ export default function ChatRoom({ user }) {
       ]);
       
       if (roomsTest.error || reactionsTest.error) {
+        console.error('Table tests failed:', { roomsTest: roomsTest.error, reactionsTest: reactionsTest.error });
         setSetupError('Database tables not set up. Please run the SQL setup script.');
         setDbSetupComplete(false);
       } else {
+        console.log('Database setup check passed');
         setDbSetupComplete(true);
         setSetupError(null);
       }
     } catch (error) {
+      console.error('Database setup check error:', error);
       setSetupError('Database connection error. Please check your setup.');
       setDbSetupComplete(false);
     }
@@ -213,6 +230,14 @@ export default function ChatRoom({ user }) {
   useEffect(() => {
     // Check database setup first
     checkDatabaseSetup();
+    
+    // Fetch rooms first
+    fetchUserProfile();
+    fetchAllUserProfiles();
+    fetchRooms();
+    
+    // Don't fetch messages if no current room is selected yet
+    if (!currentRoom) return;
     
     // Fetch existing messages for current room
     const fetchMessages = async () => {
@@ -238,10 +263,6 @@ export default function ChatRoom({ user }) {
     
     fetchMessages();
     fetchReactions();
-    fetchUserProfile();
-    fetchAllUserProfiles();
-    fetchRooms();
-    checkDatabaseSetup();
 
     // Listen for new messages in current room
     const subscription = supabase
@@ -702,6 +723,11 @@ export default function ChatRoom({ user }) {
         }
       } else {
         setRooms(data || []);
+        
+        // Set current room to first room if not already set
+        if (!currentRoom && data && data.length > 0) {
+          setCurrentRoom(data[0].id);
+        }
       }
     } catch (error) {
       console.error('Error fetching rooms:', error);
@@ -709,30 +735,37 @@ export default function ChatRoom({ user }) {
   };
 
   const createRoom = async () => {
-    if (!newRoomName.trim()) return;
+    if (!newRoomName.trim()) {
+      return;
+    }
 
     try {
+      const roomData = {
+        name: newRoomName.trim(),
+        created_by: user.email,
+        created_at: new Date().toISOString()
+      };
+
       const { data, error } = await supabase
         .from('chat_rooms')
-        .insert([{
-          id: uuidv4(),
-          name: newRoomName.trim(),
-          created_by: user.email,
-          created_at: new Date().toISOString()
-        }])
+        .insert([roomData])
         .select();
 
       if (error) {
         console.error('Error creating room:', error);
+        alert('Error creating room: ' + error.message);
       } else {
         setNewRoomName('');
         setShowRoomModal(false);
-        fetchRooms();
+        await fetchRooms();
         // Switch to the new room
-        setCurrentRoom(data[0].id);
+        if (data && data[0]) {
+          setCurrentRoom(data[0].id);
+        }
       }
     } catch (error) {
       console.error('Error creating room:', error);
+      alert('Error creating room: ' + error.message);
     }
   };
 
@@ -909,6 +942,7 @@ export default function ChatRoom({ user }) {
             </button>
             <button
               onClick={async () => {
+                if (!currentRoom) return;
                 const { data, error } = await supabase
                   .from("messages")
                   .select("*")
