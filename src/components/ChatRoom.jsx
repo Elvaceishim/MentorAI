@@ -20,7 +20,7 @@ export default function ChatRoom({ user }) {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [userProfile, setUserProfile] = useState(null);
   const [userProfiles, setUserProfiles] = useState({});
-  const [currentRoom, setCurrentRoom] = useState(null); // Start with null, will be set after rooms load
+  const [currentRoom, setCurrentRoom] = useState('00000000-0000-0000-0000-000000000001'); // Default to General room UUID
   const [rooms, setRooms] = useState([]);
   const [showRoomModal, setShowRoomModal] = useState(false);
   const [newRoomName, setNewRoomName] = useState('');
