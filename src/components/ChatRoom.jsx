@@ -951,6 +951,23 @@ export default function ChatRoom({ user }) {
     }
   };
 
+  // Sign out functionality
+  const handleSignOut = async () => {
+    if (window.confirm('Are you sure you want to sign out?')) {
+      try {
+        const { error } = await supabase.auth.signOut();
+        if (error) {
+          console.error('Error signing out:', error);
+          alert('Error signing out. Please try again.');
+        }
+        // The auth state change will be handled by the listener in App.jsx
+      } catch (error) {
+        console.error('Error signing out:', error);
+        alert('Error signing out. Please try again.');
+      }
+    }
+  };
+
   return (
     <div className="flex h-screen bg-white">
       {/* Database Setup Notice */}
@@ -1094,6 +1111,13 @@ export default function ChatRoom({ user }) {
               <span className="text-lg">
                 {soundEnabled ? '🔔' : '🔕'}
               </span>
+            </button>
+            <button
+              onClick={handleSignOut}
+              className="p-2 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-all duration-200"
+              title="Sign out"
+            >
+              <span className="text-lg">🚪</span>
             </button>
           </div>
         </div>
@@ -1532,7 +1556,7 @@ export default function ChatRoom({ user }) {
         )}
         
         <div className="text-xs text-gray-500 text-center">
-          💡 <strong>Features:</strong> Enter to send • Ctrl+M for @mentor • Esc to clear • 📎 Upload files • 🔍 Search messages • � Refresh • �🗑️ Clear chat • 📋 Copy AI • ✏️ Edit your messages • 🗑️ Delete messages • 🔔 Sound notifications • 👤 Edit profile • 😄 React with emojis • ⌨️ Typing indicators
+          💡 <strong>Features:</strong> Enter to send • Ctrl+M for @mentor • Esc to clear • 📎 Upload files • 🔍 Search messages • 🔄 Refresh • 🗑️ Clear chat • 📋 Copy AI • ✏️ Edit your messages • 🗑️ Delete messages • 🔔 Sound notifications • 👤 Edit profile • 😄 React with emojis • ⌨️ Typing indicators • 🚪 Sign out
         </div>
         </div>
       </div>
